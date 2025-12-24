@@ -1,0 +1,25 @@
+# --- LLM Official SDKs ---
+openai
+anthropic
+google-genai
+
+# --- Networking ---
+requests
+
+# --- Audio Processing ---
+pygame
+pydub
+
+# --- Document Processing ---
+pypandoc
+pypdf
+
+# --- System / Security ---
+keyring
+
+# --- Compiler & Build Tools ---
+#pyinstaller
+
+#nuitka
+#ordered-set
+#zstandard

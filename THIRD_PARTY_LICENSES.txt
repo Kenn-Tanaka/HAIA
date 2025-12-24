@@ -1,0 +1,93 @@
+THIRD PARTY LICENSES AND NOTICES
+
+This software (HAIA) makes use of the following third-party software and libraries.
+We thank the open source community for their contributions.
+
+============================================================
+Python (Programming Language)
+============================================================
+License: Python Software Foundation License (PSF)
+Copyright (c) Python Software Foundation.
+https://docs.python.org/3/license.html
+
+============================================================
+Tcl/Tk (GUI Toolkit)
+============================================================
+License: Tcl/Tk License (BSD-style)
+Copyright (c) Regents of the University of California, Sun Microsystems, Inc., and other parties.
+
+============================================================
+OpenAI Python SDK
+============================================================
+License: Apache License 2.0
+Copyright (c) OpenAI
+
+============================================================
+Anthropic Python SDK
+============================================================
+License: MIT License
+Copyright (c) Anthropic, PBC
+
+============================================================
+Google Gen AI SDK (google-genai)
+============================================================
+License: Apache License 2.0
+Copyright (c) Google LLC
+
+============================================================
+Requests
+============================================================
+License: Apache License 2.0
+Copyright (c) Kenneth Reitz
+
+============================================================
+Pygame (Multimedia Library)
+============================================================
+License: LGPL (GNU Lesser General Public License) v2.1
+Copyright (c) Pygame Community
+Note: This library is dynamically linked.
+
+============================================================
+PyDub (Audio Manipulation)
+============================================================
+License: MIT License
+Copyright (c) James Robert
+
+============================================================
+pypdf (PDF Library)
+============================================================
+License: BSD 3-Clause License
+Copyright (c) pypdf developers
+
+============================================================
+pypandoc (Pandoc wrapper)
+============================================================
+License: MIT License
+Copyright (c) Juho Vepsäläinen
+
+============================================================
+keyring
+============================================================
+License: MIT License
+Copyright (c) Python Software Foundation and Jason R. Coombs
+
+============================================================
+Nuitka (Python Compiler)
+============================================================
+This application was compiled using Nuitka.
+License: Apache License 2.0
+Copyright (c) Kay Hayen
+
+------------------------------------------------------------
+EXTERNAL TOOLS (User Installed)
+------------------------------------------------------------
+The following tools are not bundled with this software but are required for full functionality.
+Users are responsible for complying with their respective licenses upon installation.
+
+1. FFmpeg
+   License: LGPL v2.1+ or GPL v2+ (depending on build)
+   https://ffmpeg.org/legal.html
+
+2. Pandoc
+   License: GPL (GNU General Public License) v2
+   https://pandoc.org/

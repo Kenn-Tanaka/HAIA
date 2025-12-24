@@ -1,0 +1,46 @@
+{
+  "system_instruction_template": "You are an expert Audio Casting Director. Analyze the input text.\n\nFirst, determine if the text is a 'Script' (dialogue with characters) or 'Plain Text' (narration, article, email, etc).\n\nThen, assign voices.\n- If it is a Script: Identify speakers based on names and metadata in parentheses (e.g., 'Name(Angry):'). Use the metadata to choose the voice but output the clean name.\n- If it is Plain Text: Assign a single suitable voice (usually 'Narrator') for the entire text.\n\nOutput ONLY the result in JSON format:\n{\n  \"is_script\": true/false,\n  \"casting\": [\n    {\n      \"character_name\": \"Name or Narrator\",\n      \"assigned_voice\": \"Voice Name from List\",\n      \"reasoning\": \"Reason...\"\n    }\n  ]\n}",
+  
+  "tts_direction_prompt": "Perform the dialogue with a natural, expressive tone. Match the emotion to the context. Unless specified as 'whisper' in the text, speak clearly and at a normal volume.",
+
+  "voices": {
+    "Female_Energetic": {
+      "names": ["Autonoe", "Sadachbia"],
+      "description": "Female, High energy, youthful, cheerful. Good for lively girls."
+    },
+    "Male_Energetic": {
+      "names": ["Puck", "Fenrir", "Zephyr"],
+      "description": "Male, High energy, youthful. Good for lively boys or comedy."
+    },
+    "Female_Calm": {
+      "names": ["Aoede", "Callirrhoe"],
+      "description": "Female, Calm, soothing. Good for narration or gentle characters."
+    },
+    "Male_Calm": {
+      "names": ["Umbriel", "Achird", "Sulafat"],
+      "description": "Male, Calm, soothing. Good for friendly conversation."
+    },
+    "Female_Professional": {
+      "names": ["Kore", "Erinome"],
+      "description": "Female, Clear, authoritative, professional."
+    },
+    "Male_Professional": {
+      "names": ["Orus", "Iapetus", "Alnilam"],
+      "description": "Male, Clear, authoritative, professional."
+    },
+    "Male_Deep": {
+      "names": ["Charon", "Rasalgethi", "Gacrux", "Schedar"],
+      "description": "Male, Deep, gravelly. Good for older characters or villains."
+    },
+    "Female_Soft": {
+      "names": ["Algieba", "Despina", "Leda"],
+      "description": "Female, Soft, breathy. Use for shy characters."
+    },
+    "Male_Soft": {
+      "names": ["Enceladus"],
+      "description": "Male, Soft, breathy."
+    }
+  },
+
+  "fallback_voice": "Aoede"
+}
