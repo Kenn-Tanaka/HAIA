@@ -175,7 +175,7 @@ class ConfigManager:
         return self.config
     def save(self, data):
         try:
-            with open(self.path, 'w', encoding='utf-8') as f: json.dump(data, f, indent=4)
+            with open(self.path, 'w', encoding='utf-8') as f: json.dump(data, f, indent=4, ensure_ascii=False)
         except Exception as e: print(f"Settings Save Error: {e}")
 
 # リソースローダー
