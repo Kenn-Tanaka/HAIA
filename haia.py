@@ -116,7 +116,7 @@ except ImportError:
 # ==========================================
 # 0. 定数・設定・ヘルパー
 # ==========================================
-APP_VERSION = "0.17"
+APP_VERSION = "0.18"
 SERVICE_NAME = "CloudLLM"
 TASKS_FILENAME = "tasks.json"
 SETTINGS_FILENAME = "settings.json"
@@ -136,7 +136,11 @@ DEFAULT_SETTINGS = {
     "window_width": 900, "window_height": 950, "font_size": 10,
     "temperature": 0.7, "request_timeout": 120,
     "last_model_index": 0, "last_task_index": 0,
-    "custom_system_prompt": "あなたは優秀なAIアシスタントです。"
+    "custom_system_prompt": "あなたは優秀なAIアシスタントです。",
+    # --- Pandoc用テンプレート設定 ---
+    "reference_docx": "./templates/custom.docx",
+    "reference_odt": "./templates/custom.odt",
+    "reference_pptx": "./templates/custom.pptx"
 }
 
 DEFAULT_MODELS = {
@@ -616,8 +620,40 @@ class App(tk.Tk):
         ttk.Button(tb_out, text="🔁 入替", command=self._swap_input_output).pack(side="right", padx=2)
         ttk.Button(tb_out, text="⬆️ 転記", command=self._transfer_output).pack(side="right", padx=2)
         
-        self.text_output = scrolledtext.ScrolledText(output_container, height=10, state="disabled", bg="#f8f8f8", font=self.custom_font)
-        self.text_output.pack(fill="both", expand=True)
+        # 修正: Text + 縦横スクロールバーの組み合わせに変更 (Ver.0.18)
+        # これにより、巨大な表が来ても折り返し計算を行わず(wrap=tk.NONE)、フリーズしない
+        text_frame = ttk.Frame(output_container)
+        text_frame.pack(fill="both", expand=True)
+
+        # スクロールバーの作成
+        h_scroll = ttk.Scrollbar(text_frame, orient="horizontal")
+        v_scroll = ttk.Scrollbar(text_frame, orient="vertical")
+
+        # テキストウィジェット本体 (wrap=tk.NONE が重要！)
+        self.text_output = tk.Text(
+            text_frame, 
+            height=10, 
+            state="disabled", 
+            bg="#f8f8f8", 
+            font=self.custom_font,
+            wrap=tk.NONE,                 # ★重要：折り返しを無効化
+            xscrollcommand=h_scroll.set,  # 横スクロール連携
+            yscrollcommand=v_scroll.set   # 縦スクロール連携
+        )
+
+        # 配置 (Gridを使ってきれいに並べる)
+        h_scroll.config(command=self.text_output.xview)
+        v_scroll.config(command=self.text_output.yview)
+
+        self.text_output.grid(row=0, column=0, sticky="nsew")
+        v_scroll.grid(row=0, column=1, sticky="ns")
+        h_scroll.grid(row=1, column=0, sticky="ew")
+        # 修正ここまで (Ver0.18)
+
+        # リサイズ時の挙動設定
+        text_frame.grid_rowconfigure(0, weight=1)
+        text_frame.grid_columnconfigure(0, weight=1)
+
         self._bind_context_menu(self.text_output)
 
         self.status_var = tk.StringVar(value="Ready")
@@ -915,6 +951,7 @@ class App(tk.Tk):
                 ("Text File", "*.txt"),
                 ("Markdown", "*.md"),
                 ("Word Document", "*.docx"),
+                ("PowerPoint", "*.pptx"),     # ★追加
                 ("OpenDocument Text", "*.odt"),
                 ("HTML File", "*.html"),
                 ("EPUB Book", "*.epub")
@@ -930,15 +967,57 @@ class App(tk.Tk):
             title="保存先を選択"
         )
         if not fp: return
+
         try:
             content = self.text_output.get("1.0", tk.END)
             ext = os.path.splitext(fp)[1].lower()
-            if PANDOC_AVAILABLE and ext in [".docx", ".odt", ".epub", ".html"]:
-                pypandoc.convert_text(content, to=ext.replace('.',''), format='markdown', outputfile=fp, extra_args=['--standalone'])
+            
+            # Pandoc変換対象の拡張子
+            pandoc_exts = [".docx", ".odt", ".epub", ".html", ".pptx"]
+
+            if PANDOC_AVAILABLE and ext in pandoc_exts:
+                extra_args = ['--standalone']
+                
+                # --- テンプレート適用のロジック ---
+                # 拡張子と設定キーの対応マップ
+                ref_map = {
+                    ".docx": "reference_docx",
+                    ".odt":  "reference_odt",
+                    ".pptx": "reference_pptx"
+                }
+                
+                if ext in ref_map:
+                    # settings.jsonからパスを取得
+                    ref_path_setting = self.settings.get(ref_map[ext], "")
+                    if ref_path_setting:
+                        # パスを絶対パスに解決 (resolve_pathを利用)
+                        # ※ resolve_pathは既存の関数を使います
+                        abs_ref_path = resolve_path(ref_path_setting)
+                        
+                        if os.path.exists(abs_ref_path):
+                            extra_args.append(f'--reference-doc={abs_ref_path}')
+                            print(f"[Info] Applied reference doc: {abs_ref_path}")
+                        else:
+                            print(f"[Warning] Reference doc not found: {abs_ref_path}")
+
+                # 変換実行
+                output_format = ext.replace('.', '')
+                pypandoc.convert_text(
+                    content, 
+                    to=output_format, 
+                    format='markdown', 
+                    outputfile=fp, 
+                    extra_args=extra_args
+                )
             else:
+                # 通常のテキスト保存
                 with open(fp, "w", encoding="utf-8") as f: f.write(content)
+            
             self.status_var.set(f"保存しました: {os.path.basename(fp)}")
-        except Exception as e: messagebox.showerror("Error", str(e))
+
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            print(f"Save Error: {e}")
 
     def _copy_output(self):
         self.clipboard_clear()
