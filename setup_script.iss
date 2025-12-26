@@ -3,12 +3,12 @@
 ; ==========================================================
 
 #define MyAppName "HAIA"
-#define MyAppVersion "0.17"
+#define MyAppVersion "0.19"
 #define MyAppPublisher "HAIA Project"
-#define MyAppExeName "haia_v0_17.exe"
+#define MyAppExeName "haia_v0_19.exe"
 ; ↑ Nuitkaが出力したEXE名
 
-#define BuildSourceDir "haia_v0_17.dist"
+#define BuildSourceDir "haia.dist"
 ; ↑ Nuitkaが出力したフォルダ名
 
 [Setup]
@@ -23,7 +23,7 @@ DefaultGroupName={#MyAppName}
 
 ; --- 出力設定 ---
 OutputDir=.
-OutputBaseFilename=HAIA_v0.17_Setup
+OutputBaseFilename=HAIA_v0.19_Setup
 Compression=lzma
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -69,7 +69,7 @@ Source: "prompts\*"; DestDir: "{app}\prompts"; Flags: ignoreversion recursesubdi
 
 [Icons]
 ; スタートメニューのショートカット
-; ターゲットは bin\haia_v0_17.exe ですが、作業フォルダ(WorkingDir)をルート({app})にします
+; ターゲットは bin\haia.exe ですが、作業フォルダ(WorkingDir)をルート({app})にします
 Name: "{group}\{#MyAppName}"; Filename: "{app}\bin\{#MyAppExeName}"; WorkingDir: "{app}"
 
 ; デスクトップショートカット

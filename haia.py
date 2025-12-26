@@ -116,7 +116,7 @@ except ImportError:
 # ==========================================
 # 0. 定数・設定・ヘルパー
 # ==========================================
-APP_VERSION = "0.18"
+APP_VERSION = "0.19"
 SERVICE_NAME = "CloudLLM"
 TASKS_FILENAME = "tasks.json"
 SETTINGS_FILENAME = "settings.json"
@@ -254,7 +254,8 @@ class LLMHandler:
         # --- Google Gemini ---
         if provider == "google":
             if not GEMINI_SDK_AVAILABLE: raise ImportError("google-genaiライブラリが必要です")
-            api_key = KeyManager.get_key("gemini")
+            # ★修正: 環境変数もチェック
+            api_key = KeyManager.get_key("gemini") or os.environ.get("GEMINI_API_KEY")
             if not api_key: raise ValueError("Gemini APIキー未設定")
             
             client = genai.Client(api_key=api_key)
@@ -367,13 +368,15 @@ class AudioHandler:
     def _get_client(self):
         if self.gemini_client: return self.gemini_client
         if not GEMINI_SDK_AVAILABLE: raise ImportError("google-genai ライブラリが必要です。")
-        api_key = KeyManager.get_key("gemini")
+        # ★修正: 環境変数もチェック
+        api_key = KeyManager.get_key("gemini") or os.environ.get("GEMINI_API_KEY")
         if not api_key: raise ValueError("Gemini API Keyが設定されていません。")
         self.gemini_client = genai.Client(api_key=api_key)
         return self.gemini_client
 
     def is_ready(self):
-        return KeyManager.get_key("gemini") is not None
+        # ★修正: 環境変数があればReadyとする
+        return (KeyManager.get_key("gemini") or os.environ.get("GEMINI_API_KEY")) is not None
 
     def stop_playback(self):
         if pygame.mixer.get_init(): pygame.mixer.music.stop()
@@ -519,7 +522,7 @@ class App(tk.Tk):
         self.custom_font = tkfont.Font(family="Meiryo UI", size=self.base_font_size)
         
         self._create_menu()
-        self._init_ui()
+        self._init_ui() # UI構築メソッド（タブ構成に変更）
         
         self.after(500, lambda: self._refresh_model_list(silent=True))
         
@@ -557,8 +560,32 @@ class App(tk.Tk):
         v_menu.add_command(label="文字拡大", command=lambda: self._change_font_size(1))
         v_menu.add_command(label="文字縮小", command=lambda: self._change_font_size(-1))
 
+    # ==========================================
+    # UI構築 (Ver0.19 タブ化対応)
+    # ==========================================
     def _init_ui(self):
-        control_frame = ttk.LabelFrame(self, text="AI設定", padding=10)
+        # Notebook (タブコンテナ) の作成
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
+
+        self.tab_main = ttk.Frame(self.notebook)
+        self.tab_editor = ttk.Frame(self.notebook)
+
+        self.notebook.add(self.tab_main, text="テキスト生成") 
+        self.notebook.add(self.tab_editor, text="プロンプト管理")
+
+        # 各タブの中身を初期化
+        self._init_main_tab()
+        self._init_editor_tab()
+        
+        # イベントバインド
+        self.bind('<Control-Return>', lambda e: self.on_run())
+        # タブ切り替え時にリストをリロードする
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+    def _init_main_tab(self):
+        # --- 既存のメイン画面UI (parentを self.tab_main に変更) ---
+        control_frame = ttk.LabelFrame(self.tab_main, text="AI設定", padding=10)
         control_frame.pack(fill="x", padx=10, pady=5)
         
         f_model = ttk.Frame(control_frame)
@@ -572,11 +599,12 @@ class App(tk.Tk):
         f_prompt_ctrl = ttk.Frame(control_frame)
         f_prompt_ctrl.pack(fill="x", pady=(10, 2))
         ttk.Label(f_prompt_ctrl, text="プリセット:").pack(side="left")
-        self.combo_task = ttk.Combobox(f_prompt_ctrl, values=list(self.system_prompts.keys()), state="readonly", width=30)
+        # ★初期化時もソートして表示
+        self.combo_task = ttk.Combobox(f_prompt_ctrl, values=sorted(list(self.system_prompts.keys())), state="readonly", width=30)
         self.combo_task.pack(side="left", padx=5)
         self.combo_task.bind("<<ComboboxSelected>>", self._on_preset_selected)
         
-        ttk.Label(control_frame, text="システムプロンプト (編集可):").pack(anchor="w", pady=(5, 0))
+        ttk.Label(control_frame, text="システムプロンプト (編集可 - 一時的):").pack(anchor="w", pady=(5, 0))
         self.text_system_prompt = scrolledtext.ScrolledText(control_frame, height=5, font=("Meiryo UI", 9))
         self.text_system_prompt.pack(fill="both", expand=True, padx=5, pady=5)
         self.text_system_prompt.insert("1.0", self.settings.get("custom_system_prompt", ""))
@@ -589,7 +617,7 @@ class App(tk.Tk):
         self.scale_temp.set(self.settings.get("temperature", 0.7))
         self.scale_temp.pack(side="left", padx=10)
 
-        input_container = ttk.LabelFrame(self, text="入力テキスト", padding=(10, 5, 10, 10))
+        input_container = ttk.LabelFrame(self.tab_main, text="入力テキスト", padding=(10, 5, 10, 10))
         input_container.pack(fill="both", expand=True, padx=10, pady=5)
         tb_in = ttk.Frame(input_container)
         tb_in.pack(fill="x")
@@ -598,11 +626,12 @@ class App(tk.Tk):
         self.text_input = scrolledtext.ScrolledText(input_container, height=6, font=self.custom_font)
         self.text_input.pack(fill="both", expand=True)
         self._bind_context_menu(self.text_input)
+        self.text_input.bind("<Control-MouseWheel>", self._on_zoom)
 
-        self.btn_run = ttk.Button(self, text="▶ テキスト生成 (Ctrl+Enter)", command=self.on_run)
+        self.btn_run = ttk.Button(self.tab_main, text="▶ テキスト生成 (Ctrl+Enter)", command=self.on_run)
         self.btn_run.pack(pady=5, ipadx=40, ipady=5)
 
-        output_container = ttk.LabelFrame(self, text="AIの回答 / 音声操作", padding=(10, 5, 10, 10))
+        output_container = ttk.LabelFrame(self.tab_main, text="AIの回答 / 音声操作", padding=(10, 5, 10, 10))
         output_container.pack(fill="both", expand=True, padx=10, pady=5)
         tb_out = ttk.Frame(output_container)
         tb_out.pack(fill="x")
@@ -620,48 +649,88 @@ class App(tk.Tk):
         ttk.Button(tb_out, text="🔁 入替", command=self._swap_input_output).pack(side="right", padx=2)
         ttk.Button(tb_out, text="⬆️ 転記", command=self._transfer_output).pack(side="right", padx=2)
         
-        # 修正: Text + 縦横スクロールバーの組み合わせに変更 (Ver.0.18)
-        # これにより、巨大な表が来ても折り返し計算を行わず(wrap=tk.NONE)、フリーズしない
         text_frame = ttk.Frame(output_container)
         text_frame.pack(fill="both", expand=True)
-
-        # スクロールバーの作成
         h_scroll = ttk.Scrollbar(text_frame, orient="horizontal")
         v_scroll = ttk.Scrollbar(text_frame, orient="vertical")
-
-        # テキストウィジェット本体 (wrap=tk.NONE が重要！)
         self.text_output = tk.Text(
-            text_frame, 
-            height=10, 
-            state="disabled", 
-            bg="#f8f8f8", 
-            font=self.custom_font,
-            wrap=tk.NONE,                 # ★重要：折り返しを無効化
-            xscrollcommand=h_scroll.set,  # 横スクロール連携
-            yscrollcommand=v_scroll.set   # 縦スクロール連携
+            text_frame, height=10, state="disabled", bg="#f8f8f8", font=self.custom_font,
+            wrap=tk.NONE, xscrollcommand=h_scroll.set, yscrollcommand=v_scroll.set
         )
-
-        # 配置 (Gridを使ってきれいに並べる)
         h_scroll.config(command=self.text_output.xview)
         v_scroll.config(command=self.text_output.yview)
-
         self.text_output.grid(row=0, column=0, sticky="nsew")
         v_scroll.grid(row=0, column=1, sticky="ns")
         h_scroll.grid(row=1, column=0, sticky="ew")
-        # 修正ここまで (Ver0.18)
-
-        # リサイズ時の挙動設定
         text_frame.grid_rowconfigure(0, weight=1)
         text_frame.grid_columnconfigure(0, weight=1)
-
         self._bind_context_menu(self.text_output)
+        self.text_output.bind("<Control-MouseWheel>", self._on_zoom)
 
         self.status_var = tk.StringVar(value="Ready")
-        ttk.Label(self, textvariable=self.status_var, relief="sunken").pack(side="bottom", fill="x")
+        ttk.Label(self.tab_main, textvariable=self.status_var, relief="sunken").pack(side="bottom", fill="x")
+
+    def _init_editor_tab(self):
+        self.current_editing_key = None  # リネーム判定用
+
+        # --- プロンプト管理用の新規タブ ---
+        paned = ttk.PanedWindow(self.tab_editor, orient="horizontal")
+        paned.pack(fill="both", expand=True, padx=5, pady=5)
         
-        self.bind('<Control-Return>', lambda e: self.on_run())
-        self.text_input.bind("<Control-MouseWheel>", self._on_zoom)
-        self.text_output.bind("<Control-MouseWheel>", self._on_zoom)
+        # 左側: タスクリスト
+        left_frame = ttk.Frame(paned, width=200)
+        paned.add(left_frame, weight=1)
+        
+        ttk.Label(left_frame, text="プロンプト一覧").pack(anchor="w")
+        list_frame = ttk.Frame(left_frame)
+        list_frame.pack(fill="both", expand=True)
+        self.lb_tasks = tk.Listbox(list_frame, exportselection=False)
+        self.lb_tasks.pack(side="left", fill="both", expand=True)
+        sb_tasks = ttk.Scrollbar(list_frame, orient="vertical", command=self.lb_tasks.yview)
+        sb_tasks.pack(side="right", fill="y")
+        self.lb_tasks.config(yscrollcommand=sb_tasks.set)
+        self.lb_tasks.bind("<<ListboxSelect>>", self._on_task_select_editor)
+        
+        btn_frame = ttk.Frame(left_frame)
+        btn_frame.pack(fill="x", pady=5)
+        ttk.Button(btn_frame, text="＋ 新規追加", command=self._add_new_task).pack(side="left", expand=True, fill="x")
+        ttk.Button(btn_frame, text="－ 削除", command=self._delete_task).pack(side="left", expand=True, fill="x")
+
+        # 右側: 編集エリア
+        right_frame = ttk.Frame(paned)
+        paned.add(right_frame, weight=3)
+        
+        f_name = ttk.Frame(right_frame)
+        f_name.pack(fill="x", pady=5)
+        ttk.Label(f_name, text="タスク名(キー):").pack(side="left")
+        self.ent_task_key = ttk.Entry(f_name)
+        self.ent_task_key.pack(side="left", fill="x", expand=True, padx=5)
+        self._bind_context_menu(self.ent_task_key) # ★右クリックメニュー追加
+        
+        f_path = ttk.Frame(right_frame)
+        f_path.pack(fill="x", pady=5)
+        ttk.Label(f_path, text="保存先ファイル:").pack(side="left")
+        self.ent_task_path = ttk.Entry(f_path)
+        self.ent_task_path.pack(side="left", fill="x", expand=True, padx=5)
+        self._bind_context_menu(self.ent_task_path) # ★右クリックメニュー追加
+
+        # 「...」ボタンでファイル選択ダイアログを開く
+        ttk.Button(f_path, text="...", width=3, command=self._browse_task_path).pack(side="left", padx=2)
+        ttk.Label(f_path, text="(空白=JSON直埋込)").pack(side="left")
+
+        ttk.Label(right_frame, text="プロンプト内容:").pack(anchor="w")
+        self.txt_editor_content = scrolledtext.ScrolledText(right_frame, font=self.custom_font)
+        self.txt_editor_content.pack(fill="both", expand=True)
+        self._bind_context_menu(self.txt_editor_content) # ★右クリックメニュー追加
+        
+        ttk.Button(right_frame, text="💾 変更を保存", command=self._save_editor_changes).pack(anchor="e", pady=5)
+        
+        self.raw_tasks_data = {} 
+        self._reload_editor_list()
+
+    # ==========================================
+    # 内部ロジック & イベント
+    # ==========================================
 
     def _bind_context_menu(self, w):
         m = Menu(w, tearoff=0)
@@ -669,7 +738,20 @@ class App(tk.Tk):
         m.add_command(label="Copy", command=lambda: w.event_generate("<<Copy>>"))
         m.add_command(label="Paste", command=lambda: w.event_generate("<<Paste>>"))
         m.add_separator()
-        m.add_command(label="Select All", command=lambda: w.tag_add("sel", "1.0", "end"))
+        
+        def select_all():
+            w.focus_set()
+            # Entry (tk or ttk)の場合は select_range
+            if isinstance(w, (tk.Entry, ttk.Entry)):
+                w.select_range(0, tk.END)
+            else:
+                # Text / ScrolledText の場合は tag_add
+                try:
+                    w.tag_add("sel", "1.0", "end")
+                except:
+                    pass 
+
+        m.add_command(label="Select All", command=select_all)
         w.bind("<Button-3>", lambda e: m.tk_popup(e.x_root, e.y_root))
 
     def _on_preset_selected(self, event):
@@ -678,7 +760,8 @@ class App(tk.Tk):
         self.text_system_prompt.insert(tk.END, self.system_prompts.get(task, ""))
 
     def _check_gemini_key(self):
-        key = KeyManager.get_key("gemini")
+        # ★修正: 環境変数もチェック
+        key = KeyManager.get_key("gemini") or os.environ.get("GEMINI_API_KEY")
         if key: self.lbl_engine_status.config(text="TTS: Gemini (OK)", foreground="green")
         else: self.lbl_engine_status.config(text="TTS: Gemini (Key未設定)", foreground="red")
     
@@ -697,44 +780,35 @@ class App(tk.Tk):
     def _refresh_model_list(self, silent=False):
         if hasattr(self, 'btn_model_refresh'):
             self.btn_model_refresh.config(state="disabled")
-        
         if not silent:
             self.status_var.set("モデルリストを取得中...")
-
         thread = threading.Thread(target=self._thread_fetch_models, args=(silent,), daemon=True)
         thread.start()
 
     def _thread_fetch_models(self, silent):
         self.cloud_models, _ = load_models_config()
         current_map = self.cloud_models.copy()
-
         ollama_models = self.handler.get_installed_ollama_models()
         for m in ollama_models:
             current_map[f"[Local] {m}"] = f"ollama/{m}"
-
         self.after(0, self._update_model_ui, current_map, silent)
 
     def _update_model_ui(self, model_map, silent):
         self.dynamic_model_map = model_map
         self.combo_model['values'] = list(self.dynamic_model_map.keys())
-        
         last_idx = self.settings.get("last_model_index", 0)
         if self.combo_model['values']:
-            if last_idx < len(self.combo_model['values']):
-                self.combo_model.current(last_idx)
-            else:
-                self.combo_model.current(0)
-
-        self.combo_task['values'] = list(self.system_prompts.keys())
+            if last_idx < len(self.combo_model['values']): self.combo_model.current(last_idx)
+            else: self.combo_model.current(0)
+        
+        # タスクリスト更新（ここでもソート）
+        self.combo_task['values'] = sorted(list(self.system_prompts.keys()))
         last_task_idx = self.settings.get("last_task_index", -1)
         if 0 <= last_task_idx < len(self.combo_task['values']):
             self.combo_task.current(last_task_idx)
 
-        if hasattr(self, 'btn_model_refresh'):
-            self.btn_model_refresh.config(state="normal")
-
-        if not silent:
-            self.status_var.set("モデルリスト更新完了")
+        if hasattr(self, 'btn_model_refresh'): self.btn_model_refresh.config(state="normal")
+        if not silent: self.status_var.set("モデルリスト更新完了")
 
     def on_run(self):
         if self.is_running:
@@ -758,6 +832,10 @@ class App(tk.Tk):
         self.text_output.config(state="normal")
         self.text_output.delete("1.0", tk.END)
         self.status_var.set(f"生成中... (Temp: {temperature})")
+        
+        # 生成時は自動的にメインタブを選択状態にする
+        self.notebook.select(self.tab_main)
+
         thread = threading.Thread(target=self._run_thread, args=(full_id, sys_prompt, input_text, temperature))
         thread.start()
         self.after(100, self._process_queue)
@@ -767,7 +845,6 @@ class App(tk.Tk):
             for chunk in self.handler.stream_response(full_id, sys_prompt, text, temp):
                 if not self.is_running: return
                 self.msg_queue.put(("data", chunk))
-            
             if self.is_running: self.msg_queue.put(("finish", None))
         except Exception as e:
             if self.is_running: self.msg_queue.put(("error", str(e)))
@@ -794,24 +871,30 @@ class App(tk.Tk):
         self.text_output.config(state="disabled")
         self.status_var.set(msg)
 
+    # --- ヘルパー: 自動ファイル名生成 (Ver0.19) ---
+    def _make_auto_filename(self, ext):
+        base_name = self.combo_task.get()
+        if not base_name: base_name = "Output"
+        # ファイル名禁止文字を置換
+        safe_name = re.sub(r'[\\/:*?"<>|]+', '_', base_name)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        return f"{safe_name}_{timestamp}{ext}"
+
+    # --- 配役・音声機能 ---
     def _extract_json_string(self, text):
         text = text.strip()
         text = re.sub(r'^```json\s*', '', text, flags=re.MULTILINE)
         text = re.sub(r'^```\s*', '', text, flags=re.MULTILINE)
         text = re.sub(r'\s*```$', '', text, flags=re.MULTILINE)
-
         idx = text.find('{')
         if idx == -1: return None
-        
         text = text[idx:]
         balance = 0
         for i, char in enumerate(text):
-            if char == '{':
-                balance += 1
+            if char == '{': balance += 1
             elif char == '}':
                 balance -= 1
-                if balance == 0:
-                    return text[:i+1]
+                if balance == 0: return text[:i+1]
         return None
 
     def _perform_casting(self, text):
@@ -838,26 +921,18 @@ class App(tk.Tk):
 
         try:
             result_text = self.handler.generate_text_oneshot(full_id, system_instruction, text, temperature=0.0)
-            
             json_str = self._extract_json_string(result_text)
             if not json_str: raise ValueError("JSONが見つかりませんでした")
-
             data = json.loads(json_str)
             voice_map = {}
             fallback = self.casting_config.get("fallback_voice", "Aoede")
-            
             for item in data.get("casting", []):
                 char = item["character_name"]
                 raw_voice = item["assigned_voice"].strip()
-                if raw_voice.lower() in valid_voices:
-                    voice_map[char] = raw_voice
-                elif raw_voice in category_map:
-                    voice_map[char] = category_map[raw_voice]
-                else:
-                    voice_map[char] = fallback
-            
+                if raw_voice.lower() in valid_voices: voice_map[char] = raw_voice
+                elif raw_voice in category_map: voice_map[char] = category_map[raw_voice]
+                else: voice_map[char] = fallback
             return voice_map, data.get("is_script", False)
-
         except Exception as e:
             print(f"Casting Error: {e}")
             messagebox.showerror("配役エラー", f"配役の決定に失敗しました。\n{e}")
@@ -876,7 +951,6 @@ class App(tk.Tk):
     def _save_audio_with_casting(self):
         text = self.text_output.get("1.0", tk.END).strip()
         if not text: return
-        
         if getattr(self.audio, "ffmpeg_available", False):
             ft = [("MP3 Audio", "*.mp3"), ("WAV Audio", "*.wav")]
             d_ext = ".mp3"
@@ -884,9 +958,11 @@ class App(tk.Tk):
             ft = [("WAV Audio", "*.wav")]
             d_ext = ".wav"
 
+        default_filename = self._make_auto_filename(d_ext) # 自動ファイル名
+
         filename = filedialog.asksaveasfilename(
-            defaultextension=d_ext, 
-            filetypes=ft, 
+            defaultextension=d_ext, filetypes=ft, 
+            initialfile=default_filename,
             title="音声を保存"
         )
         if not filename: return
@@ -904,11 +980,14 @@ class App(tk.Tk):
         self.audio.stop_playback()
         self.status_var.set("再生停止")
     
+    # --- 設定管理 ---
     def _reload_configs(self):
         self._refresh_model_list()
         self.system_prompts, _ = load_system_prompts()
         self.casting_config = load_casting_config()
-        self.combo_task['values'] = list(self.system_prompts.keys())
+        self.combo_task['values'] = sorted(list(self.system_prompts.keys()))
+        # エディタ画面もリロード
+        self._reload_editor_list()
         messagebox.showinfo("更新", "設定を再読み込みしました")
 
     def _on_zoom(self, event):
@@ -947,23 +1026,19 @@ class App(tk.Tk):
 
     def _save_output(self):
         if PANDOC_AVAILABLE:
-            ft = [
-                ("Text File", "*.txt"),
-                ("Markdown", "*.md"),
-                ("Word Document", "*.docx"),
-                ("PowerPoint", "*.pptx"),     # ★追加
-                ("OpenDocument Text", "*.odt"),
-                ("HTML File", "*.html"),
-                ("EPUB Book", "*.epub")
-            ]
+            ft = [("Text File", "*.txt"), ("Markdown", "*.md"), ("Word Document", "*.docx"),
+                  ("PowerPoint", "*.pptx"), ("OpenDocument Text", "*.odt"),
+                  ("HTML File", "*.html"), ("EPUB Book", "*.epub")]
             d_ext = ".docx"
         else:
             ft = [("Text File", "*.txt")]
             d_ext = ".txt"
 
+        default_filename = self._make_auto_filename(d_ext) # 自動ファイル名
+
         fp = filedialog.asksaveasfilename(
-            defaultextension=d_ext, 
-            filetypes=ft, 
+            defaultextension=d_ext, filetypes=ft,
+            initialfile=default_filename, 
             title="保存先を選択"
         )
         if not fp: return
@@ -971,50 +1046,25 @@ class App(tk.Tk):
         try:
             content = self.text_output.get("1.0", tk.END)
             ext = os.path.splitext(fp)[1].lower()
-            
-            # Pandoc変換対象の拡張子
             pandoc_exts = [".docx", ".odt", ".epub", ".html", ".pptx"]
 
             if PANDOC_AVAILABLE and ext in pandoc_exts:
                 extra_args = ['--standalone']
-                
-                # --- テンプレート適用のロジック ---
-                # 拡張子と設定キーの対応マップ
-                ref_map = {
-                    ".docx": "reference_docx",
-                    ".odt":  "reference_odt",
-                    ".pptx": "reference_pptx"
-                }
-                
+                ref_map = {".docx": "reference_docx", ".odt": "reference_odt", ".pptx": "reference_pptx"}
                 if ext in ref_map:
-                    # settings.jsonからパスを取得
                     ref_path_setting = self.settings.get(ref_map[ext], "")
                     if ref_path_setting:
-                        # パスを絶対パスに解決 (resolve_pathを利用)
-                        # ※ resolve_pathは既存の関数を使います
                         abs_ref_path = resolve_path(ref_path_setting)
-                        
                         if os.path.exists(abs_ref_path):
                             extra_args.append(f'--reference-doc={abs_ref_path}')
                             print(f"[Info] Applied reference doc: {abs_ref_path}")
                         else:
                             print(f"[Warning] Reference doc not found: {abs_ref_path}")
-
-                # 変換実行
                 output_format = ext.replace('.', '')
-                pypandoc.convert_text(
-                    content, 
-                    to=output_format, 
-                    format='markdown', 
-                    outputfile=fp, 
-                    extra_args=extra_args
-                )
+                pypandoc.convert_text(content, to=output_format, format='markdown', outputfile=fp, extra_args=extra_args)
             else:
-                # 通常のテキスト保存
                 with open(fp, "w", encoding="utf-8") as f: f.write(content)
-            
             self.status_var.set(f"保存しました: {os.path.basename(fp)}")
-
         except Exception as e:
             messagebox.showerror("Error", str(e))
             print(f"Save Error: {e}")
@@ -1049,6 +1099,189 @@ class App(tk.Tk):
             self.text_output.insert(tk.END, text)
         finally:
             if prev_state != str(self.text_output.cget("state")): self.text_output.config(state=prev_state)
+
+    # ==========================================
+    # プロンプトエディタ用ロジック (Ver0.19 新機能)
+    # ==========================================
+    def _reload_editor_list(self):
+        self.lb_tasks.delete(0, tk.END)
+        path = resolve_path(TASKS_FILENAME)
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f: self.raw_tasks_data = json.load(f)
+            except: self.raw_tasks_data = {}
+        else: self.raw_tasks_data = {}
+        # ★ここでもソートして表示
+        for key in sorted(self.raw_tasks_data.keys()): self.lb_tasks.insert(tk.END, key)
+
+    def _on_task_select_editor(self, event):
+        idx = self.lb_tasks.curselection()
+        if not idx: return
+        key = self.lb_tasks.get(idx)
+        val = self.raw_tasks_data.get(key)
+        
+        self.current_editing_key = key
+        
+        self.ent_task_key.delete(0, tk.END)
+        self.ent_task_key.insert(0, key)
+
+        self.ent_task_path.delete(0, tk.END)
+        self.txt_editor_content.delete("1.0", tk.END)
+        
+        content = ""
+        if isinstance(val, str) and (val.startswith("./") or val.startswith(".\\") or ":/" in val or ":\\" in val):
+            self.ent_task_path.insert(0, val)
+            real_path = resolve_path(val)
+            if real_path and os.path.exists(real_path):
+                try:
+                    with open(real_path, 'r', encoding='utf-8') as f: content = f.read()
+                except Exception as e: content = f"Error reading file: {e}"
+            else: content = "(File not found or new file path)"
+        else:
+            content = val if isinstance(val, str) else str(val)
+        
+        self.txt_editor_content.insert(tk.END, content)
+
+    def _browse_task_path(self):
+        current_val = self.ent_task_path.get().strip()
+        initial_dir = get_exe_dir()
+        initial_file = ""
+        
+        if current_val:
+            abs_path = resolve_path(current_val)
+            if os.path.dirname(abs_path):
+                initial_dir = os.path.dirname(abs_path)
+            initial_file = os.path.basename(abs_path)
+        else:
+            initial_dir = os.path.join(get_exe_dir(), "prompts", "custom")
+            if not os.path.exists(initial_dir):
+                try: os.makedirs(initial_dir)
+                except: pass
+
+        path = filedialog.asksaveasfilename(
+            title="プロンプトファイルの保存先を選択",
+            initialdir=initial_dir,
+            initialfile=initial_file,
+            filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
+            defaultextension=".txt"
+        )
+        
+        if path:
+            self.ent_task_path.delete(0, tk.END)
+            self.ent_task_path.insert(0, path)
+
+    def _add_new_task(self):
+        new_key = simpledialog.askstring("新規", "タスク名(メニュー表示名)を入力:")
+        if not new_key: return
+        if new_key in self.raw_tasks_data:
+            messagebox.showerror("エラー", "その名前は既に存在します")
+            return
+        
+        is_file = messagebox.askyesno("保存形式", "プロンプトを外部テキストファイルとして保存しますか？\n(いいえ=tasks.json内に直接記述)")
+        default_path = ""
+        default_content = "あなたは優秀なアシスタントです。"
+        
+        if is_file:
+            safe_name = "".join([c for c in new_key if c.isalnum() or c in (' ', '_', '-')]).strip()
+            rel_path = f"./prompts/custom/{safe_name}.txt"
+            default_path = rel_path
+            abs_dir = resolve_path("./prompts/custom/")
+            if not os.path.exists(abs_dir): os.makedirs(abs_dir, exist_ok=True)
+
+        self.raw_tasks_data[new_key] = default_path if is_file else default_content
+        
+        if is_file:
+            abs_path = resolve_path(default_path)
+            if not os.path.dirname(abs_path): 
+                 abs_path = os.path.join(get_exe_dir(), "prompts", "custom", f"{safe_name}.txt")
+                 os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+            with open(abs_path, 'w', encoding='utf-8') as f: f.write(default_content)
+
+        self._save_raw_tasks_json()
+        self._reload_editor_list()
+        self.lb_tasks.selection_clear(0, tk.END)
+        self.lb_tasks.selection_set(tk.END)
+        self._on_task_select_editor(None)
+
+    def _save_editor_changes(self):
+        new_key = self.ent_task_key.get().strip()
+        path_str = self.ent_task_path.get().strip()
+        content = self.txt_editor_content.get("1.0", tk.END).strip()
+        
+        if not new_key:
+            messagebox.showwarning("警告", "タスク名を入力してください")
+            return
+
+        old_key = self.current_editing_key
+        is_rename = (old_key is not None) and (new_key != old_key)
+
+        if is_rename and new_key in self.raw_tasks_data:
+            if not messagebox.askyesno("確認", f"タスク名 '{new_key}' は既に存在します。\n上書きしますか？"):
+                return
+
+        if path_str:
+            real_path = resolve_path(path_str)
+            try:
+                os.makedirs(os.path.dirname(real_path), exist_ok=True)
+                with open(real_path, 'w', encoding='utf-8') as f: f.write(content)
+                self.raw_tasks_data[new_key] = path_str
+                messagebox.showinfo("保存", f"ファイルを更新しました: {path_str}")
+            except Exception as e:
+                messagebox.showerror("エラー", f"ファイル保存失敗: {e}")
+                return
+        else:
+            self.raw_tasks_data[new_key] = content
+            messagebox.showinfo("保存", "JSON内のプロンプトを更新しました")
+
+        if is_rename and old_key in self.raw_tasks_data:
+            del self.raw_tasks_data[old_key]
+            self.current_editing_key = new_key
+
+        self._save_raw_tasks_json()
+        self._reload_editor_list()
+        
+        try:
+            items = self.lb_tasks.get(0, tk.END)
+            if new_key in items:
+                idx = items.index(new_key)
+                self.lb_tasks.selection_clear(0, tk.END)
+                self.lb_tasks.selection_set(idx)
+                self.lb_tasks.see(idx)
+        except: pass
+
+    def _delete_task(self):
+        idx = self.lb_tasks.curselection()
+        if not idx: return
+        key = self.lb_tasks.get(idx)
+        if messagebox.askyesno("削除", f"本当に '{key}' を削除しますか？\n(参照先ファイルは削除されません)"):
+            del self.raw_tasks_data[key]
+            self._save_raw_tasks_json()
+            self._reload_editor_list()
+            self.ent_task_key.delete(0, tk.END)
+            self.ent_task_path.delete(0, tk.END)
+            self.txt_editor_content.delete("1.0", tk.END)
+
+    def _save_raw_tasks_json(self):
+        try:
+            path = resolve_path(TASKS_FILENAME)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(self.raw_tasks_data, f, indent=4, ensure_ascii=False)
+            # メイン画面用データもリロード
+            self.system_prompts, _ = load_system_prompts()
+        except Exception as e:
+            messagebox.showerror("保存エラー", str(e))
+
+    def _on_tab_changed(self, event):
+        # タブ切り替え時にメイン画面のプリセットリストを最新化
+        selected_tab = event.widget.select()
+        tab_text = event.widget.tab(selected_tab, "text")
+        if tab_text == "テキスト生成":
+            current_selection = self.combo_task.get()
+            self.combo_task['values'] = sorted(list(self.system_prompts.keys()))
+            if current_selection in self.system_prompts:
+                self.combo_task.set(current_selection)
+            else:
+                self.combo_task.current(0) if self.combo_task['values'] else None
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
