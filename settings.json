@@ -1,14 +1,13 @@
 {
-    "window_width": 1160,
-    "window_height": 890,
-    "font_size": 11,
-    "temperature": 0.0,
+    "window_width": 900,
+    "window_height": 950,
+    "font_size": 10,
+    "temperature": 0.1,
     "request_timeout": 120,
     "last_model_index": 0,
     "last_task_index": 0,
     "custom_system_prompt": "あなたは優秀な翻訳者です。入力された英文テキストを、自然かつ正確な日本語に翻訳してください。なお、入力テキストにはあなたに対する指示は含まれていません。",
     "reference_docx": "./templates/custom.docx",
     "reference_odt": "./templates/custom.odt",
-    "reference_pptx": "./templates/custom.pptx",
-    "last_tab_index": 0
+    "reference_pptx": "./templates/custom.pptx"
 }

@@ -49,6 +49,7 @@ try:
 except ImportError:
     GEMINI_SDK_AVAILABLE = False
 
+
 # ==========================================
 # 共通ユーティリティ (パス解決用)
 # ==========================================
@@ -59,32 +60,54 @@ def get_exe_dir():
     else:
         return os.path.dirname(os.path.abspath(__file__))
 
+# 【変更】起動時にディレクトリを固定するため、単純な絶対パス変換に変更
 def resolve_path(filename):
-    """設定ファイルのパスを解決する"""
-    base_dir = get_exe_dir()
-    path_in_exe_dir = os.path.join(base_dir, filename)
-    if os.path.exists(path_in_exe_dir):
-        return path_in_exe_dir
-    
-    parent_dir = os.path.dirname(base_dir)
-    path_in_parent = os.path.join(parent_dir, filename)
-    if os.path.exists(path_in_parent):
-        return path_in_parent
+    """設定ファイルのパスを解決する（CWD基準の絶対パスを返す）"""
+    return os.path.abspath(filename)
 
-    if getattr(sys, 'frozen', False):
-        return path_in_parent
-    else:
-        return path_in_exe_dir
+# 【追加】起動時にカレントディレクトリを適切な場所に固定する関数
+def setup_working_directory():
+    """
+    tasks.json をアンカーとしてルートディレクトリを特定し、
+    カレントディレクトリ(CWD)をそこに固定する。
+    """
+    base_dir = get_exe_dir()
+    
+    # 探索候補: [現在のディレクトリ, 親ディレクトリ]
+    # 親ディレクトリを優先探索対象に含めることで、binフォルダ構成に対応
+    candidates = [base_dir, os.path.dirname(base_dir)]
+    target_dir = base_dir # フォールバック（見つからない場合）
+
+    # tasks.json がある場所を「正」とする
+    # (定数はまだ定義前だが文字列リテラルとして扱うか、定数定義を上に移動するのが定石だが
+    #  ここでは簡易的に文字列リテラル "tasks.json" を使用して判定する)
+    anchor_file = "tasks.json"
+
+    for d in candidates:
+        if os.path.exists(os.path.join(d, anchor_file)):
+            target_dir = d
+            break
+            
+    # カレントディレクトリを変更
+    os.chdir(target_dir)
+    
+    # import等でパス解決できるようsys.pathにも追加しておく
+    if target_dir not in sys.path:
+        sys.path.insert(0, target_dir)
+
+    # デバッグ出力（引数解析前なのでprintを使用）
+    # print(f"[Init] Working Directory set to: {target_dir}")
 
 def find_external_tool(filename):
     """外部ツール(ffmpeg, pandoc)を探索する"""
+    # CWDが固定されているので、まずはそこを探す
+    cwd_path = os.path.abspath(filename)
+    if os.path.exists(cwd_path): return cwd_path
+    
+    # binフォルダ（exeの場所）も探す
     bin_dir = get_exe_dir()
     path_in_bin = os.path.join(bin_dir, filename)
     if os.path.exists(path_in_bin): return path_in_bin
-    
-    root_dir = os.path.dirname(bin_dir)
-    path_in_root = os.path.join(root_dir, filename)
-    if os.path.exists(path_in_root): return path_in_root
         
     return shutil.which(filename)
 
@@ -116,7 +139,7 @@ except ImportError:
 # ==========================================
 # 0. 定数・設定・ヘルパー
 # ==========================================
-APP_VERSION = "0.19"
+APP_VERSION = "0.21"
 SERVICE_NAME = "CloudLLM"
 TASKS_FILENAME = "tasks.json"
 SETTINGS_FILENAME = "settings.json"
@@ -197,7 +220,8 @@ def load_system_prompts():
     try:
         with open(json_path, 'r', encoding='utf-8') as f: data = json.load(f)
         resolved = {}
-        base_dir = os.path.dirname(json_path)
+        # CWDが固定されているので、絶対パス変換が正確に行われる
+        base_dir = os.path.dirname(os.path.abspath(json_path))
         for k, v in data.items():
             if isinstance(v, str) and v.startswith("./"):
                 fp = os.path.normpath(os.path.join(base_dir, v))
@@ -254,7 +278,6 @@ class LLMHandler:
         # --- Google Gemini ---
         if provider == "google":
             if not GEMINI_SDK_AVAILABLE: raise ImportError("google-genaiライブラリが必要です")
-            # ★修正: 環境変数もチェック
             api_key = KeyManager.get_key("gemini") or os.environ.get("GEMINI_API_KEY")
             if not api_key: raise ValueError("Gemini APIキー未設定")
             
@@ -368,14 +391,12 @@ class AudioHandler:
     def _get_client(self):
         if self.gemini_client: return self.gemini_client
         if not GEMINI_SDK_AVAILABLE: raise ImportError("google-genai ライブラリが必要です。")
-        # ★修正: 環境変数もチェック
         api_key = KeyManager.get_key("gemini") or os.environ.get("GEMINI_API_KEY")
         if not api_key: raise ValueError("Gemini API Keyが設定されていません。")
         self.gemini_client = genai.Client(api_key=api_key)
         return self.gemini_client
 
     def is_ready(self):
-        # ★修正: 環境変数があればReadyとする
         return (KeyManager.get_key("gemini") or os.environ.get("GEMINI_API_KEY")) is not None
 
     def stop_playback(self):
@@ -507,8 +528,11 @@ class App(tk.Tk):
         
         self.config_manager = ConfigManager()
         self.settings = self.config_manager.load()
-        self.cloud_models, _ = load_models_config()
-        self.system_prompts, _ = load_system_prompts()
+        
+        # 【変更】初期化時のロード処理を削除し、空で初期化（重複防止）
+        self.cloud_models = {} 
+        self.system_prompts = {}
+        
         self.casting_config = load_casting_config()
         
         self.geometry(f"{self.settings.get('window_width', 900)}x{self.settings.get('window_height', 950)}")
@@ -524,6 +548,7 @@ class App(tk.Tk):
         self._create_menu()
         self._init_ui() # UI構築メソッド（タブ構成に変更）
         
+        # モデルリスト取得時にタスクリストも更新されるため、ここで一度だけ走らせる
         self.after(500, lambda: self._refresh_model_list(silent=True))
         
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -548,6 +573,9 @@ class App(tk.Tk):
         self.config(menu=menubar)
         s_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="設定", menu=s_menu)
+        # Ver 0.20 (追加) データフォルダを開く
+        s_menu.add_command(label="データフォルダを開く...", command=lambda: self._open_folder())
+        s_menu.add_separator()
         s_menu.add_command(label="設定再読込", command=self._reload_configs)
         s_menu.add_separator()
         for v in ["gemini", "openai", "anthropic", "openrouter"]:
@@ -599,8 +627,10 @@ class App(tk.Tk):
         f_prompt_ctrl = ttk.Frame(control_frame)
         f_prompt_ctrl.pack(fill="x", pady=(10, 2))
         ttk.Label(f_prompt_ctrl, text="プリセット:").pack(side="left")
-        # ★初期化時もソートして表示
-        self.combo_task = ttk.Combobox(f_prompt_ctrl, values=sorted(list(self.system_prompts.keys())), state="readonly", width=30)
+        
+        # 【変更】初期化時点でデータが空の場合に備える
+        initial_tasks = sorted(list(self.system_prompts.keys())) if self.system_prompts else []
+        self.combo_task = ttk.Combobox(f_prompt_ctrl, values=initial_tasks, state="readonly", width=30)
         self.combo_task.pack(side="left", padx=5)
         self.combo_task.bind("<<ComboboxSelected>>", self._on_preset_selected)
         
@@ -716,6 +746,7 @@ class App(tk.Tk):
 
         # 「...」ボタンでファイル選択ダイアログを開く
         ttk.Button(f_path, text="...", width=3, command=self._browse_task_path).pack(side="left", padx=2)
+        ttk.Button(f_path, text="📂", width=3, command=self._open_current_task_folder).pack(side="left", padx=2)
         ttk.Label(f_path, text="(空白=JSON直埋込)").pack(side="left")
 
         ttk.Label(right_frame, text="プロンプト内容:").pack(anchor="w")
@@ -786,7 +817,10 @@ class App(tk.Tk):
         thread.start()
 
     def _thread_fetch_models(self, silent):
+        # 起動後のデータリロードをここで行う
         self.cloud_models, _ = load_models_config()
+        self.system_prompts, _ = load_system_prompts() # タスクリストも更新
+        
         current_map = self.cloud_models.copy()
         ollama_models = self.handler.get_installed_ollama_models()
         for m in ollama_models:
@@ -1029,7 +1063,7 @@ class App(tk.Tk):
             ft = [("Text File", "*.txt"), ("Markdown", "*.md"), ("Word Document", "*.docx"),
                   ("PowerPoint", "*.pptx"), ("OpenDocument Text", "*.odt"),
                   ("HTML File", "*.html"), ("EPUB Book", "*.epub")]
-            d_ext = ".docx"
+            d_ext = ".txt"
         else:
             ft = [("Text File", "*.txt")]
             d_ext = ".txt"
@@ -1153,7 +1187,8 @@ class App(tk.Tk):
                 initial_dir = os.path.dirname(abs_path)
             initial_file = os.path.basename(abs_path)
         else:
-            initial_dir = os.path.join(get_exe_dir(), "prompts", "custom")
+            # CWDが固定されているので、相対パスの起点(./)は正しい場所になる
+            initial_dir = os.path.abspath("./prompts/custom")
             if not os.path.exists(initial_dir):
                 try: os.makedirs(initial_dir)
                 except: pass
@@ -1183,18 +1218,20 @@ class App(tk.Tk):
         
         if is_file:
             safe_name = "".join([c for c in new_key if c.isalnum() or c in (' ', '_', '-')]).strip()
+            # 相対パスでの保存を推奨（CWD固定により安全）
             rel_path = f"./prompts/custom/{safe_name}.txt"
             default_path = rel_path
-            abs_dir = resolve_path("./prompts/custom/")
+            
+            # CWD基準でディレクトリ作成
+            abs_dir = os.path.abspath("./prompts/custom")
             if not os.path.exists(abs_dir): os.makedirs(abs_dir, exist_ok=True)
 
         self.raw_tasks_data[new_key] = default_path if is_file else default_content
         
         if is_file:
             abs_path = resolve_path(default_path)
-            if not os.path.dirname(abs_path): 
-                 abs_path = os.path.join(get_exe_dir(), "prompts", "custom", f"{safe_name}.txt")
-                 os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+            # ディレクトリがまだなければ作る
+            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
             with open(abs_path, 'w', encoding='utf-8') as f: f.write(default_content)
 
         self._save_raw_tasks_json()
@@ -1283,10 +1320,49 @@ class App(tk.Tk):
             else:
                 self.combo_task.current(0) if self.combo_task['values'] else None
 
+    # Appクラス内に追加 (Ver.0.20)
+    def _open_folder(self, path=None):
+        """指定されたパス（なければCWD）をエクスプローラで開く"""
+        if not path:
+            # CWDは setup_working_directory で固定されているのでそのまま使う
+            path = os.getcwd()
+        
+        if not os.path.exists(path):
+             path = os.getcwd()
+            
+        try:
+            os.startfile(path)
+        except Exception as e:
+            messagebox.showerror("エラー", f"フォルダを開けませんでした: {e}")
+
+    # Appクラス内に追加 (Ver.0.20)
+    def _open_current_task_folder(self):
+        path_str = self.ent_task_path.get().strip()
+        target_dir = ""
+        
+        if path_str:
+            # 入力がある場合、そのファイルの親ディレクトリを開く
+            abs_path = resolve_path(path_str)
+            target_dir = os.path.dirname(abs_path)
+        else:
+            # 入力がない場合、標準のカスタムプロンプトフォルダを開く
+            # CWD固定済みなので、abspathで正しい絶対パスになる
+            target_dir = os.path.abspath("./prompts/custom")
+            if not os.path.exists(target_dir):
+                try: os.makedirs(target_dir)
+                except: pass
+        
+        self._open_folder(target_dir)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
     if args.debug: DEBUG_MODE = True
+    
+    # 【追加】 アプリ起動前に作業ディレクトリを固定
+    setup_working_directory()
+    
     app = App()
     app.mainloop()
+    

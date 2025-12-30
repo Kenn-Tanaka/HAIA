@@ -16,6 +16,7 @@ pandoc.exe
 build/
 dist/
 *.spec
+Output/
 
 # 仮想環境
 .venv/

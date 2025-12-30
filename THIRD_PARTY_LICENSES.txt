@@ -3,6 +3,10 @@ THIRD PARTY LICENSES AND NOTICES
 This software (HAIA) makes use of the following third-party software and libraries.
 We thank the open source community for their contributions.
 
+Note:
+This list covers bundled libraries and tools only.
+The terms of use for external AI services (e.g. OpenAI, Google, Anthropic) are governed by each provider’s service agreement.
+
 ============================================================
 Python (Programming Language)
 ============================================================
