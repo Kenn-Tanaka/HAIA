@@ -17,5 +17,6 @@
     "W01 Pythonコードから仕様書": "./prompts/software_development/Pythonコードから仕様書作成.txt",
     "B03 文字起こし修正": "./prompts/general/文字起こしの修正.txt",
     "Z01 システムプロンプトのレビュー": "./prompts/meta/妥当性チェック用メタプロンプト.txt",
-    "S01 情報セキュリティインシデント分析": "./prompts/cyber_security/情報セキュリティインシデント分析.txt"
+    "S01 情報セキュリティインシデント分析": "./prompts/cyber_security/情報セキュリティインシデント分析.txt",
+    "Z02 架空事故事例生成": "./prompts/custom/架空事故事例生成.txt"
 }

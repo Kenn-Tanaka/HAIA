@@ -2,7 +2,7 @@
 ; HAIA Installer Script (Hybrid Structure)
 ; ==========================================================
 #define MyAppName "HAIA"
-#define MyAppVersion "0.21"
+#define MyAppVersion "0.26"
 #define MyAppPublisher "My Name"
 #define MyAppExeName "haia.exe"
 

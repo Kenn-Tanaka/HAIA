@@ -2,7 +2,7 @@
     "window_width": 900,
     "window_height": 950,
     "font_size": 10,
-    "temperature": 0.1,
+    "temperature": 0.0,
     "request_timeout": 120,
     "last_model_index": 0,
     "last_task_index": 0,
