@@ -80,7 +80,17 @@ Source: "{#ProjectRoot}\THIRD_PARTY_LICENSES.txt"; DestDir: "{app}"; Flags: igno
 ; ----------------------------------------------------------
 ; 4. プロンプトフォルダ
 ; ----------------------------------------------------------
-Source: "{#ProjectRoot}\prompts\*"; DestDir: "{app}\prompts"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ProjectRoot}\prompts\general\*"; DestDir: "{app}\prompts\general"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ProjectRoot}\prompts\failure_analysis\*"; DestDir: "{app}\prompts\failure_analysis"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ProjectRoot}\prompts\cyber_security\*"; DestDir: "{app}\prompts\cyber_security"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ProjectRoot}\prompts\meta\*"; DestDir: "{app}\prompts\meta"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ProjectRoot}\prompts\scenario_writing\*"; DestDir: "{app}\prompts\scenario_writing"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ProjectRoot}\prompts\software_development\*"; DestDir: "{app}\prompts\software_development"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; ----------------------------------------------------------
+; 5. テンプレートフォルダ
+; ----------------------------------------------------------
+Source: "{#ProjectRoot}\templates\*"; DestDir: "{app}\templates"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 ; スタートメニュー

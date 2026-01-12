@@ -14,6 +14,7 @@ import threading
 import requests
 import os
 import sys
+import platform
 import json
 import queue
 import keyring
@@ -64,6 +65,17 @@ def resolve_path(filename):
     """設定ファイルのパスを解決する（CWD基準の絶対パスを返す）"""
     return os.path.abspath(filename)
 
+def get_executable_name(base_name):
+    """
+    OSに応じて実行ファイル名を決定する
+    Windows: base_name + .exe
+    Linux/Mac: base_name
+    """
+    name = base_name.lower()
+    if platform.system() == "Windows":
+        return f"{name}.exe"
+    return name
+
 def setup_working_directory():
     """
     tasks.json をアンカーとしてルートディレクトリを特定し、
@@ -102,7 +114,8 @@ def find_external_tool(filename):
 # Pandoc
 try:
     import pypandoc
-    pandoc_path = find_external_tool("pandoc.exe")
+    target_pandoc = get_executable_name("pandoc")
+    pandoc_path = find_external_tool(target_pandoc)
     if pandoc_path and os.path.exists(pandoc_path):
         os.environ["PYPANDOC_PANDOC"] = pandoc_path
     try:
@@ -124,7 +137,7 @@ except ImportError:
 # ==========================================
 # 0. 定数・設定・ヘルパー
 # ==========================================
-APP_VERSION = "0.26"
+APP_VERSION = "0.27"
 SERVICE_NAME = "CloudLLM"
 TASKS_FILENAME = "tasks.json"
 SETTINGS_FILENAME = "settings.json"
@@ -345,7 +358,8 @@ class AudioHandler:
     def __init__(self):
         pygame.mixer.init()
         self.gemini_client = None
-        self.ffmpeg_path = find_external_tool("ffmpeg.exe")
+        target_ffmpeg = get_executable_name("ffmpeg")
+        self.ffmpeg_path = find_external_tool(target_ffmpeg)
         self.ffmpeg_available = self.ffmpeg_path is not None
         if self.ffmpeg_available:
             AudioSegment.converter = self.ffmpeg_path
