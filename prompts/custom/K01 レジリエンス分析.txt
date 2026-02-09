@@ -1,0 +1,19 @@
+<workflow>
+    <step id="Y1" type="llm" ref="F01">
+        <input>[[DOCUMENT_X]]</input>
+    </step>
+
+    <step id="Y2" type="llm"  ref="F07">
+        <input>[[Y1]]</input>
+    </step>
+
+    <step id="final_output" type="llm" ref="F08c">
+        <input>
+--- インシデント報告書 ---
+[[Y1]]
+
+--- STAMP/CAST分析結果 ---
+[[Y2]]
+      </input>
+    </step>
+</workflow>

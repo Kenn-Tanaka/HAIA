@@ -3,6 +3,9 @@ openai
 anthropic
 google-genai
 
+# -- Youtube Transcript API
+youtube-transcript-api
+
 # --- Networking ---
 requests
 

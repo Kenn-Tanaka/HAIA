@@ -2,7 +2,7 @@
 ; HAIA Installer Script (Hybrid Structure)
 ; ==========================================================
 #define MyAppName "HAIA"
-#define MyAppVersion "0.26"
+#define MyAppVersion "0.30"
 #define MyAppPublisher "My Name"
 #define MyAppExeName "haia.exe"
 
@@ -81,6 +81,7 @@ Source: "{#ProjectRoot}\THIRD_PARTY_LICENSES.txt"; DestDir: "{app}"; Flags: igno
 ; 4. プロンプトフォルダ
 ; ----------------------------------------------------------
 Source: "{#ProjectRoot}\prompts\general\*"; DestDir: "{app}\prompts\general"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ProjectRoot}\prompts\custom\*"; DestDir: "{app}\prompts\general"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ProjectRoot}\prompts\failure_analysis\*"; DestDir: "{app}\prompts\failure_analysis"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ProjectRoot}\prompts\cyber_security\*"; DestDir: "{app}\prompts\cyber_security"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ProjectRoot}\prompts\meta\*"; DestDir: "{app}\prompts\meta"; Flags: ignoreversion recursesubdirs createallsubdirs

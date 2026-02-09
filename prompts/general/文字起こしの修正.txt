@@ -9,6 +9,9 @@
 - 過度なフィラー（「えー」「あのー」など）は削除（ただし話者の特徴として重要な場合は保持）
 - 意味が通らない箇所は文脈から推測して修正
 
+【注意事項】
+"Input may contain metadata headers (Title, URL). Please focus your analysis on the text following the 'Transcript:' label." （入力にはメタデータが含まれる場合があります。'Transcript:' 以降のテキストに集中して分析してください。）
+
 【保持すべき要素】
 - 話し言葉の自然な表現
 - 話者の個性や言い回し

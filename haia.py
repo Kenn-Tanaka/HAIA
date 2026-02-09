@@ -28,6 +28,7 @@ import pygame
 import datetime
 import argparse
 import time
+import xml.etree.ElementTree as ET
 from pydub import AudioSegment
 
 # ==========================================
@@ -49,7 +50,6 @@ try:
     GEMINI_SDK_AVAILABLE = True
 except ImportError:
     GEMINI_SDK_AVAILABLE = False
-
 
 # ==========================================
 # 共通ユーティリティ (パス解決用)
@@ -133,11 +133,20 @@ try:
 except ImportError:
     PYPDF_AVAILABLE = False
 
+# Youtube Transcript
+try:
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        YOUTUBE_TRANSCRIPT_AVAILABLE = True
+    except Exception:
+        YOUTUBE_TRANSCRIPT_AVAILABLE = False
+except ImportError:
+    YOUTUBE_TRANSCRIPT_AVAILABLE = None
 
 # ==========================================
 # 0. 定数・設定・ヘルパー
 # ==========================================
-APP_VERSION = "0.27"
+APP_VERSION = "0.30"
 SERVICE_NAME = "CloudLLM"
 TASKS_FILENAME = "tasks.json"
 SETTINGS_FILENAME = "settings.json"
@@ -155,7 +164,7 @@ DEFAULT_CASTING_CONFIG = {
 
 DEFAULT_SETTINGS = {
     "window_width": 900, "window_height": 950, "font_size": 10,
-    "temperature": 0.7, "request_timeout": 120,
+    "temperature": 0.7, "request_timeout": 120, "no_output_timeout": 60, "max_display_lines": 5000,
     "last_model_index": 0, "last_task_index": 0,
     "custom_system_prompt": "あなたは優秀なAIアシスタントです。",
     "reference_docx": "./templates/custom.docx",
@@ -647,6 +656,9 @@ class App(tk.Tk):
         self.audio = AudioHandler()
         self.dynamic_model_map = {} 
         self.msg_queue = queue.Queue()
+        self.output_log_chunks = []
+        self.max_display_lines = int(self.settings.get("max_display_lines", 5000))
+        self.no_output_timeout = float(self.settings.get("no_output_timeout", 60))
         self.is_running = False
         self.base_font_size = self.settings.get("font_size", 10)
         
@@ -713,43 +725,52 @@ class App(tk.Tk):
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
     def _init_main_tab(self):
-        control_frame = ttk.LabelFrame(self.tab_main, text="AI設定", padding=10)
+        control_frame = ttk.LabelFrame(self.tab_main, text="AI設定", padding=(10, 5, 10, 10))
         control_frame.pack(fill="x", padx=10, pady=5)
-        
-        f_model = ttk.Frame(control_frame)
-        f_model.pack(fill="x", pady=2)
+        f_upper_control = ttk.Frame(control_frame, padding=(0, 0, 0, 0))
+        f_lower_control = ttk.Frame(control_frame, padding=(0, 0, 0, 0))
+        f_upper_control.pack(side="top", fill="x", anchor="w")
+        f_lower_control.pack(side="top", fill="x", anchor="w")
+        f_left_control = ttk.Frame(f_upper_control, padding=(0, 0, 0, 0))
+        f_right_control = ttk.Frame(f_upper_control, padding=(0, 0, 0, 0))
+        f_left_control.pack(side="left", fill="x")
+        f_right_control.pack(side="left", fill="x", padx=25)
+
+        f_model = ttk.Frame(f_left_control, padding=(0, 0, 0, 0))
+        f_model.pack(side="top", fill="x", pady=2)
         ttk.Label(f_model, text="モデル:").pack(side="left")
-        self.combo_model = ttk.Combobox(f_model, state="readonly", width=40)
+        self.combo_model = ttk.Combobox(f_model, state="readonly", width=60)
         self.combo_model.pack(side="left", padx=5)
         self.btn_model_refresh = ttk.Button(f_model, text="更新", width=4, command=lambda: self._refresh_model_list(False))
         self.btn_model_refresh.pack(side="left")
 
-        f_prompt_ctrl = ttk.Frame(control_frame)
+        f_prompt_ctrl = ttk.Frame(f_left_control, padding=(0, 0, 0, 0))
         f_prompt_ctrl.pack(fill="x", pady=(10, 2))
         ttk.Label(f_prompt_ctrl, text="プリセット:").pack(side="left")
         
         initial_tasks = sorted(list(self.system_prompts.keys())) if self.system_prompts else []
-        self.combo_task = ttk.Combobox(f_prompt_ctrl, values=initial_tasks, state="readonly", width=30)
+        self.combo_task = ttk.Combobox(f_prompt_ctrl, values=initial_tasks, state="readonly", width=70)
         self.combo_task.pack(side="left", padx=5)
         self.combo_task.bind("<<ComboboxSelected>>", self._on_preset_selected)
-        
-        ttk.Label(control_frame, text="システムプロンプト (編集可 - 一時的):").pack(anchor="w", pady=(5, 0))
-        self.text_system_prompt = ZoomableText(control_frame, font_obj=self.custom_font, height=5)
-        self.text_system_prompt.pack(fill="both", expand=True, padx=5, pady=5)
-        self.text_system_prompt.insert("1.0", self.settings.get("custom_system_prompt", ""))
 
-        f_temp = ttk.Frame(control_frame)
-        f_temp.pack(fill="x", pady=2)
-        ttk.Label(f_temp, text="創造性 (Temp):").pack(side="left")
+        f_temp = ttk.Frame(f_right_control, padding=(0, 0, 0, 0))
+        f_temp.pack(side="left", fill="x", pady=2)
+        ttk.Label(f_temp, text="創造性 (Temperature):").pack(side="top", anchor="w")
         self.scale_temp = tk.Scale(f_temp, from_=0.0, to=1.0, resolution=0.1, orient="horizontal", length=200)
         self.scale_temp.set(self.settings.get("temperature", 0.7))
-        self.scale_temp.pack(side="left", padx=10)
+        self.scale_temp.pack(side="top", anchor="w", padx=10)
+       
+        ttk.Label(f_lower_control, text="システムプロンプト (編集可 - 一時的):").pack(anchor="w", pady=(5, 0))
+        self.text_system_prompt = ZoomableText(f_lower_control, font_obj=self.custom_font, height=5)
+        self.text_system_prompt.pack(fill="both", expand=True, padx=5, pady=5)
+        self.text_system_prompt.insert("1.0", self.settings.get("custom_system_prompt", ""))
 
         input_container = ttk.LabelFrame(self.tab_main, text="入力テキスト", padding=(10, 5, 10, 10))
         input_container.pack(fill="both", expand=True, padx=10, pady=5)
         tb_in = ttk.Frame(input_container)
         tb_in.pack(fill="x")
         ttk.Button(tb_in, text="📂 読込", command=self._load_file_to_input).pack(side="left")
+        ttk.Button(tb_in, text="Youtube字幕読み込み", command=self._open_youtube_transcript_dialog).pack(side="left", padx=5)
         ttk.Button(tb_in, text="🗑️ クリア", command=lambda: self.text_input.delete("1.0", tk.END)).pack(side="right")
         
         self.text_input = ZoomableText(input_container, font_obj=self.custom_font, height=6)
@@ -765,6 +786,11 @@ class App(tk.Tk):
         
         self.lbl_engine_status = ttk.Label(tb_out, text="TTS: 準備中", foreground="gray")
         self.lbl_engine_status.pack(side="left")
+
+        # XML出力時に最終結果のみをコピー/保存する
+        self.var_export_final_only = tk.BooleanVar(value=False)
+        ttk.Checkbutton(tb_out, text="XML最終のみ", variable=self.var_export_final_only).pack(side="left", padx=6)
+
         ttk.Button(tb_out, text="💾 保存", command=self._save_output).pack(side="left", padx=5)
         ttk.Button(tb_out, text="📋 コピー", command=self._copy_output).pack(side="left")
         ttk.Separator(tb_out, orient="vertical").pack(side="left", padx=5, fill="y")
@@ -923,59 +949,398 @@ class App(tk.Tk):
         if hasattr(self, 'btn_model_refresh'): self.btn_model_refresh.config(state="normal")
         if not silent: self.status_var.set("モデルリスト更新完了")
 
+
+    def _resolve_system_prompt(self, ref: str, strict: bool = True) -> str:
+        """
+        workflow用の system prompt 解決（三段階）
+        1) 完全一致: self.system_prompts[ref]
+        2) コード解決: 先頭英数字コードを抽出し、"F01 " / "F01:" / "F01-" に一致するキーを探索
+        3) 曖昧なら ValueError / 見つからなければ KeyError
+        """
+        if ref in self.system_prompts:
+            return self.system_prompts[ref]
+
+        code_match = re.match(r"^([A-Za-z0-9]+)", (ref or "").strip())
+        if code_match:
+            code = code_match.group(1)
+            candidates = []
+            for k in self.system_prompts.keys():
+                if k == code:
+                    candidates.append(k)
+                    continue
+                if k.startswith(code + " ") or k.startswith(code + ":") or k.startswith(code + "-"):
+                    candidates.append(k)
+            if len(candidates) == 1:
+                return self.system_prompts[candidates[0]]
+            if len(candidates) > 1:
+                raise ValueError(f"ref '{ref}' is ambiguous: {candidates}")
+
+        if strict:
+            raise KeyError(ref)
+        return ""
+
+    def _get_full_output_text(self) -> str:
+        if getattr(self, "output_log_chunks", None):
+            return "".join(self.output_log_chunks)
+        return self.text_output.get("1.0", tk.END)
+
+
+    def _is_xml_output_text(self, text: str) -> bool:
+        t = (text or "").lstrip()
+        if not t.startswith("<"):
+            return False
+        # workflowは複数トップレベル要素で厳密XMLにならない場合があるため、簡易判定
+        return ("</" in t and ">" in t)
+
+    def _extract_final_result_from_xml(self, text: str) -> str:
+        if not text:
+            return ""
+        # <final_output>...</final_output> があればそれを最終結果として採用（最後に出たものを優先）
+        matches = re.findall(r"<final_output>\s*(.*?)\s*</final_output>", text, flags=re.DOTALL | re.IGNORECASE)
+        if matches:
+            return matches[-1].strip()
+
+        # それ以外は「最後のタグの中身」を粗く拾う（互換・保険）
+        m = re.search(r"<([A-Za-z0-9_\-]+)>\s*(.*?)\s*</\1>\s*$", text, flags=re.DOTALL)
+        if m:
+            return (m.group(2) or "").strip()
+
+        return text
+
+    def _get_output_text_for_export(self) -> str:
+        full_text = self._get_full_output_text()
+        try:
+            if getattr(self, "var_export_final_only", None) and self.var_export_final_only.get():
+                if self._is_xml_output_text(full_text):
+                    return self._extract_final_result_from_xml(full_text)
+        except Exception:
+            # 失敗時は全量にフォールバック
+            pass
+        return full_text
+
+    def _append_output_buffer(self, text_chunk: str) -> None:
+        if text_chunk:
+            self.output_log_chunks.append(text_chunk)
+
+    def _trim_output_widget_lines(self) -> None:
+        max_lines = int(getattr(self, "max_display_lines", 5000))
+        try:
+            end_idx = self.text_output.index("end-1c")
+            current_lines = int(end_idx.split(".")[0])
+        except Exception:
+            return
+        if current_lines > max_lines:
+            delete_lines = current_lines - max_lines
+            try:
+                self.text_output.delete("1.0", f"{delete_lines + 1}.0")
+            except Exception:
+                pass
+
+    def _stream_with_watchdog(self, stream_iter, stop_flag_callable):
+        """
+        stream_iter を別スレッドで回し、no_output_timeout 秒無音なら TimeoutError を送出。
+        """
+        q = queue.Queue()
+        sentinel = object()
+
+        def _worker():
+            try:
+                for ch in stream_iter:
+                    if stop_flag_callable():
+                        break
+                    q.put(("data", ch))
+                q.put(("done", None))
+            except Exception as e:
+                q.put(("err", e))
+            finally:
+                q.put(("end", sentinel))
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+        last_time = time.time()
+        while True:
+            if stop_flag_callable():
+                return
+            try:
+                kind, payload = q.get(timeout=0.25)
+            except queue.Empty:
+                if (time.time() - last_time) > float(self.no_output_timeout):
+                    raise TimeoutError(f"No output for {self.no_output_timeout} seconds")
+                continue
+
+            if kind == "data":
+                last_time = time.time()
+                yield payload
+            elif kind == "err":
+                raise payload
+            elif kind == "done":
+                return
+            elif kind == "end":
+                return
+
+    def _expand_placeholders(self, text_in: str, local_map: dict, child_scopes=None) -> str:
+        """
+        [[DOCUMENT_X]] / [[STEP_ID]] を置換。ネスト対応時は [[A1.S1]] のみ child_scopes から解決。
+        """
+        if text_in is None:
+            return ""
+        child_scopes = child_scopes or {}
+
+        def repl(m):
+            key = m.group(1).strip()
+            if "." in key:
+                return str(child_scopes.get(key, m.group(0)))
+            return str(local_map.get(key, m.group(0)))
+
+        return re.sub(r"\[\[([^\]]+)\]\]", repl, text_in)
+
+    def _execute_workflow(self, full_id: str, workflow_xml: str, document_text: str, temperature: float, ui_emit: bool = True, depth: int = 0, max_depth: int = 5):
+        if depth > max_depth:
+            raise ValueError("workflow nesting is too deep")
+
+        try:
+            root = ET.fromstring(workflow_xml.strip())
+        except Exception as e:
+            raise ValueError(f"workflow XML parse error: {e}")
+
+        if root.tag.lower() != "workflow":
+            raise ValueError("root tag must be <workflow>")
+
+        local_map = {"DOCUMENT_X": document_text}
+        child_scopes = {}
+
+        steps = list(root.findall("./step"))
+        for step in steps:
+            if not self.is_running:
+                return "", root
+
+            step_id = step.attrib.get("id", "").strip()
+            step_type = step.attrib.get("type", "llm").strip().lower()
+            ref = (step.attrib.get("ref") or "").strip()
+
+            input_node = step.find("input")
+            raw_input = input_node.text if input_node is not None and input_node.text is not None else ""
+            user_text = self._expand_placeholders(raw_input, local_map, child_scopes)
+
+            if step_type == "workflow":
+                # ネスト：子workflowは step 内の <workflow> を対象とする
+                child_wf_node = step.find("workflow")
+                if child_wf_node is None:
+                    raise ValueError(f"workflow step '{step_id}' has no <workflow> child")
+                child_xml = ET.tostring(child_wf_node, encoding="unicode")
+                child_final, child_root = self._execute_workflow(
+                    full_id=full_id,
+                    workflow_xml=child_xml,
+                    document_text=user_text,
+                    temperature=temperature,
+                    ui_emit=False,
+                    depth=depth + 1,
+                    max_depth=max_depth,
+                )
+                # 親へは child_final を返す
+                local_map[step_id] = child_final
+                # 明示参照用スコープ（例: [[A1.S1]]）
+                child_scopes[f"{step_id}.final"] = child_final
+                try:
+                    for cs in child_root.findall(".//step"):
+                        cid = (cs.attrib.get("id") or "").strip()
+                        if not cid:
+                            continue
+                        rnode = cs.find("result")
+                        if rnode is not None and rnode.text is not None:
+                            child_scopes[f"{step_id}.{cid}"] = rnode.text
+                except Exception:
+                    pass
+
+                # XMLに子結果を埋め込む
+                result_node = step.find("result")
+                if result_node is None:
+                    result_node = ET.SubElement(step, "result")
+                result_node.clear()
+                result_node.text = child_final
+
+                continue
+
+            # llm step
+            if not ref:
+                raise KeyError(f"step '{step_id}' has no ref")
+
+            system_prompt = self._resolve_system_prompt(ref, strict=True)
+            req_timeout = float(self.settings.get("request_timeout", 120))
+
+            if ui_emit:
+                self.msg_queue.put(("data", f"<{step_id}>\n"))
+
+            collected = []
+            flush_buf = []
+            last_flush = time.time()
+            last_flush_len = 0
+
+            stream_iter = self.handler.stream_response(
+                full_id, system_prompt, user_text, temperature=temperature, timeout=req_timeout
+            )
+            for chunk in self._stream_with_watchdog(stream_iter, stop_flag_callable=lambda: not self.is_running):
+                if not self.is_running:
+                    return {step_id: "".join(collected)}, root
+                collected.append(chunk)
+                flush_buf.append(chunk)
+
+                now = time.time()
+                buf_len = sum(len(x) for x in flush_buf)
+                if buf_len >= 800 or (now - last_flush) >= 0.15:
+                    if ui_emit:
+                        self.msg_queue.put(("data", "".join(flush_buf)))
+                    flush_buf.clear()
+                    last_flush = now
+                    last_flush_len = 0
+
+            if flush_buf and ui_emit:
+                self.msg_queue.put(("data", "".join(flush_buf)))
+
+            step_text = "".join(collected)
+            local_map[step_id] = step_text
+
+            if ui_emit:
+                self.msg_queue.put(("data", f"\n</{step_id}>\n"))
+
+            # XMLに結果を埋め込む（<result>）
+            result_node = step.find("result")
+            if result_node is None:
+                result_node = ET.SubElement(step, "result")
+            result_node.text = step_text
+
+        final_output = local_map.get("final_output", "")
+        return final_output, root
+
+    def _run_workflow_thread(self, full_id: str, workflow_xml: str, document_text: str, temperature: float):
+        try:
+            final_text, root = self._execute_workflow(full_id, workflow_xml, document_text, temperature, ui_emit=True)
+            if self.is_running:
+                self.msg_queue.put(("finish", None))
+        except Exception as e:
+            if self.is_running:
+                self.msg_queue.put(("error", str(e)))
+
     def on_run(self):
         if self.is_running:
             self.is_running = False
             self.status_var.set("中断しました")
             self.btn_run.config(text="▶ テキスト生成 (Ctrl+Enter)")
             return
+
         input_text = self.text_input.get("1.0", tk.END).strip()
         if not input_text:
             messagebox.showwarning("警告", "入力テキストが空です")
             return
+
         display_name = self.combo_model.get()
-        if not display_name: return
+        if not display_name:
+            return
         full_id = self.dynamic_model_map.get(display_name, "")
-        
+
         sys_prompt = self.text_system_prompt.get("1.0", tk.END).strip()
         temperature = self.scale_temp.get()
 
         self.is_running = True
         self.btn_run.config(text="■ 中断")
+
+        # 出力初期化（全量バッファも）
+        self.output_log_chunks = []
         self.text_output.config(state="normal")
         self.text_output.delete("1.0", tk.END)
+
         self.status_var.set(f"生成中... (Temp: {temperature})")
-        
         self.notebook.select(self.tab_main)
 
-        thread = threading.Thread(target=self._run_thread, args=(full_id, sys_prompt, input_text, temperature))
+        if sys_prompt.lstrip().lower().startswith("<workflow"):
+            thread = threading.Thread(
+                target=self._run_workflow_thread,
+                args=(full_id, sys_prompt, input_text, temperature),
+                daemon=True
+            )
+        else:
+            thread = threading.Thread(
+                target=self._run_thread,
+                args=(full_id, sys_prompt, input_text, temperature),
+                daemon=True
+            )
+
         thread.start()
-        self.after(100, self._process_queue)
+        self.after(50, self._process_queue)
 
     def _run_thread(self, full_id, sys_prompt, text, temp):
         try:
-            for chunk in self.handler.stream_response(full_id, sys_prompt, text, temp):
-                if not self.is_running: return
+            req_timeout = float(self.settings.get("request_timeout", 120))
+            stream_iter = self.handler.stream_response(full_id, sys_prompt, text, temperature=temp, timeout=req_timeout)
+            for chunk in self._stream_with_watchdog(stream_iter, stop_flag_callable=lambda: not self.is_running):
+                if not self.is_running:
+                    return
                 self.msg_queue.put(("data", chunk))
-            if self.is_running: self.msg_queue.put(("finish", None))
+            if self.is_running:
+                self.msg_queue.put(("finish", None))
         except Exception as e:
-            if self.is_running: self.msg_queue.put(("error", str(e)))
+            if self.is_running:
+                self.msg_queue.put(("error", str(e)))
 
     def _process_queue(self):
-        try:
-            while True:
+        """
+        UIフリーズ対策:
+        - ("data", ...) をまとめ書き
+        - see() は最後に1回
+        - 1回の処理時間に上限を設ける
+        - finish/error を優先
+        """
+        start_time = time.perf_counter()
+        data_buf = []
+        finish_msg = None
+        error_msg = None
+
+        while (time.perf_counter() - start_time) < 0.03:
+            try:
                 m_type, content = self.msg_queue.get_nowait()
-                if m_type == "data":
-                    self.text_output.insert(tk.END, content)
-                    self.text_output.see(tk.END)
-                elif m_type == "finish": self._end_proc("完了"); return
-                elif m_type == "error":
-                    self.text_output.insert(tk.END, f"\n[Error] {content}")
-                    self._end_proc("エラー発生")
-                    return
-        except queue.Empty:
-            if self.is_running: self.after(100, self._process_queue)
-            else: self._end_proc("中断")
+            except queue.Empty:
+                break
+
+            if m_type == "data":
+                if content:
+                    data_buf.append(content)
+            elif m_type == "finish":
+                finish_msg = "完了"
+                break
+            elif m_type == "error":
+                error_msg = content or "unknown error"
+                break
+
+        if data_buf:
+            joined = "".join(data_buf)
+            self._append_output_buffer(joined)
+            try:
+                self.text_output.insert(tk.END, joined)
+                self._trim_output_widget_lines()
+                self.text_output.see(tk.END)
+            except Exception:
+                pass
+
+        if error_msg is not None:
+            err_text = f"\n[Error] {error_msg}"
+            self._append_output_buffer(err_text)
+            try:
+                self.text_output.insert(tk.END, err_text)
+                self.text_output.see(tk.END)
+            except Exception:
+                pass
+            self._end_proc("エラー発生")
+            return
+
+        if finish_msg is not None:
+            self._end_proc(finish_msg)
+            return
+
+        if self.is_running:
+            self.after(50, self._process_queue)
+        else:
+            self._end_proc("中断")
 
     def _end_proc(self, msg):
         self.is_running = False
@@ -1049,7 +1414,7 @@ class App(tk.Tk):
             return None, False
 
     def _play_audio_with_casting(self):
-        text = self.text_output.get("1.0", tk.END).strip()
+        text = self._get_full_output_text().strip()
         if not text: return
         threading.Thread(target=self._run_cast_and_play, args=(text,), daemon=True).start()
 
@@ -1063,7 +1428,7 @@ class App(tk.Tk):
             )
 
     def _save_audio_with_casting(self):
-        text = self.text_output.get("1.0", tk.END).strip()
+        text = self._get_full_output_text().strip()
         if not text: return
         if getattr(self.audio, "ffmpeg_available", False):
             ft = [("MP3 Audio", "*.mp3"), ("WAV Audio", "*.wav")]
@@ -1133,6 +1498,206 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
+    # ------------------------------
+    # YouTubeタイトル・字幕読み込み（Ver.0.30+）
+    # ------------------------------
+    def _yt_get_video_info(self, url):
+        """oEmbed APIを使用して動画のタイトルを取得する"""
+        try:
+            # YouTubeのoEmbedエンドポイントを利用
+            oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+            res = requests.get(oembed_url, timeout=5)
+            if res.status_code == 200:
+                return res.json().get("title", "Unknown Title")
+        except:
+            pass
+        return "Unknown Title"
+
+    def _open_youtube_transcript_dialog(self):
+        if not globals().get("YOUTUBE_TRANSCRIPT_AVAILABLE", False):
+            messagebox.showerror("YouTube字幕", "youtube-transcript-api が見つかりません。")
+            return
+
+        dlg = tk.Toplevel(self)
+        dlg.title("YouTube字幕読み込み")
+        dlg.transient(self)
+        dlg.grab_set()
+
+        # URL入力
+        frm_url = ttk.Frame(dlg)
+        frm_url.pack(fill="x", padx=10, pady=10)
+        ttk.Label(frm_url, text="YouTube URL:").pack(side="left")
+        url_var = tk.StringVar(value="")
+        ent = ttk.Entry(frm_url, textvariable=url_var, width=70)
+        ent.pack(side="left", padx=6, fill="x", expand=True)
+        self._bind_entry_context_menu(ent) # 右クリックペーストを有効化
+
+        # 操作ボタン
+        frm_btn = ttk.Frame(dlg)
+        frm_btn.pack(fill="x", padx=10, pady=(0, 8))
+        btn_fetch = ttk.Button(frm_btn, text="字幕一覧取得")
+        btn_fetch.pack(side="left")
+        status_var = tk.StringVar(value="")
+        ttk.Label(frm_btn, textvariable=status_var).pack(side="left", padx=10)
+
+        # 一覧（自由選択）
+        columns = ("kind", "code", "name", "translatable")
+        tree = ttk.Treeview(dlg, columns=columns, show="headings", height=10)
+        # ... (Treeviewの見出し設定は以前と同じ) ...
+        tree.heading("kind", text="種別")
+        tree.heading("code", text="言語コード")
+        tree.heading("name", text="言語名")
+        tree.heading("translatable", text="翻訳可")
+        tree.column("kind", width=90, anchor="w")
+        tree.column("code", width=90, anchor="w")
+        tree.column("name", width=260, anchor="w")
+        tree.column("translatable", width=70, anchor="center")
+        tree.pack(fill="both", expand=True, padx=10)
+
+        # スクロール
+        sc = ttk.Scrollbar(dlg, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sc.set)
+        sc.place(in_=tree, relx=1.0, rely=0, relheight=1.0, anchor="ne")
+
+        # 下部ボタン
+        frm_bottom = ttk.Frame(dlg)
+        frm_bottom.pack(fill="x", padx=10, pady=(0, 10))
+        btn_load = ttk.Button(frm_bottom, text="読み込み", state="disabled")
+        btn_load.pack(side="right", padx=(6, 0))
+        btn_cancel = ttk.Button(frm_bottom, text="キャンセル", command=dlg.destroy)
+        btn_cancel.pack(side="right")
+
+        api = YouTubeTranscriptApi()
+        transcript_map = {}
+
+        def set_busy(is_busy: bool, msg: str = ""):
+            status_var.set(msg)
+            try:
+                btn_fetch.config(state=("disabled" if is_busy else "normal"))
+                btn_load.config(state=("disabled" if is_busy else ("normal" if tree.selection() else "disabled")))
+                btn_cancel.config(state=("disabled" if is_busy else "normal"))
+                ent.config(state=("disabled" if is_busy else "normal"))
+                tree.config(selectmode=("none" if is_busy else "browse"))
+            except Exception: pass
+
+        def on_select(_evt=None):
+            sel = tree.selection()
+            btn_load.config(state=("normal" if sel else "disabled"))
+
+        tree.bind("<<TreeviewSelect>>", on_select)
+
+        def fetch_list():
+            url = url_var.get().strip()
+            if not url:
+                messagebox.showerror("YouTube字幕", "URLを入力してください。")
+                return
+            try:
+                vid = self._yt_parse_video_id(url)
+            except Exception as e:
+                messagebox.showerror("YouTube字幕", str(e))
+                return
+
+            def worker():
+                set_busy(True, "字幕一覧を取得中…")
+                try:
+                    tlist = api.list(vid)
+                    items = []
+                    for t in tlist:
+                        kind = "自動" if getattr(t, "is_generated", False) else "手動"
+                        code = getattr(t, "language_code", "")
+                        name = getattr(t, "language", "")
+                        trans = "Yes" if getattr(t, "is_translatable", False) else ""
+                        items.append((t, kind, code, name, trans))
+                    def ui():
+                        tree.delete(*tree.get_children())
+                        transcript_map.clear()
+                        for t, kind, code, name, trans in items:
+                            iid = tree.insert("", "end", values=(kind, code, name, trans))
+                            transcript_map[iid] = t
+                        status_var.set(f"{len(items)} 件")
+                        btn_load.config(state="disabled")
+                    self.after(0, ui)
+                except Exception as e:
+                    self.after(0, lambda: messagebox.showerror("YouTube字幕", f"取得失敗: {e}"))
+                finally:
+                    self.after(0, lambda: set_busy(False, status_var.get()))
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def load_selected():
+            sel = tree.selection()
+            if not sel: return
+            t = transcript_map.get(sel[0])
+            url = url_var.get().strip()
+
+            def worker():
+                set_busy(True, "データ収集中…")
+                try:
+                    # タイトルと字幕データを並行して取得
+                    title = self._yt_get_video_info(url)
+                    rows = t.fetch().to_raw_data() # 最新APIのオブジェクトをリストに変換
+                    
+                    lines = [f"Title: {title}", f"URL: {url}", "---", "Transcript:"]
+                    for r in rows:
+                        s = str(r.get("text", "")).strip()
+                        if s: lines.append(s)
+                    
+                    full_text = "\n".join(lines)
+
+                    def ui():
+                        self.text_input.delete("1.0", tk.END)
+                        self.text_input.insert("1.0", full_text)
+                        dlg.destroy()
+                    self.after(0, ui)
+                except Exception as e:
+                    self.after(0, lambda: messagebox.showerror("Error", str(e)))
+                finally:
+                    self.after(0, lambda: set_busy(False, status_var.get()))
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        btn_fetch.config(command=fetch_list)
+        btn_load.config(command=load_selected)
+
+        # 初期フォーカス
+        try:
+            ent.focus_set()
+        except Exception:
+            pass
+
+    def _yt_parse_video_id(self, url: str) -> str:
+        # 代表的な形式に対応（watch, youtu.be, shorts, embed）
+        u = (url or "").strip()
+        if not u:
+            raise ValueError("URLが空です。")
+
+        # 文字列中に video id っぽい v= がある場合
+        m = re.search(r"[?&]v=([0-9A-Za-z_-]{6,})", u)
+        if m:
+            return m.group(1)
+
+        # youtu.be/<id>
+        m = re.search(r"youtu\.be/([0-9A-Za-z_-]{6,})", u)
+        if m:
+            return m.group(1)
+
+        # /shorts/<id>
+        m = re.search(r"/shorts/([0-9A-Za-z_-]{6,})", u)
+        if m:
+            return m.group(1)
+
+        # /embed/<id>
+        m = re.search(r"/embed/([0-9A-Za-z_-]{6,})", u)
+        if m:
+            return m.group(1)
+
+        # 最後の手段：ID単体入力
+        m = re.fullmatch(r"[0-9A-Za-z_-]{6,}", u)
+        if m:
+            return u
+
+        raise ValueError("対応していないURL形式です。")
+
     def _save_output(self):
         if PANDOC_AVAILABLE:
             ft = [("Text File", "*.txt"), ("Markdown", "*.md"), ("Word Document", "*.docx"),
@@ -1153,7 +1718,7 @@ class App(tk.Tk):
         if not fp: return
 
         try:
-            content = self.text_output.get("1.0", tk.END)
+            content = self._get_output_text_for_export()
             ext = os.path.splitext(fp)[1].lower()
             pandoc_exts = [".docx", ".odt", ".epub", ".html", ".pptx"]
 
@@ -1180,12 +1745,12 @@ class App(tk.Tk):
 
     def _copy_output(self):
         self.clipboard_clear()
-        self.clipboard_append(self.text_output.get("1.0", tk.END))
+        self.clipboard_append(self._get_output_text_for_export())
         self.status_var.set("コピーしました")
 
     def _transfer_output(self):
         self.text_input.delete("1.0", tk.END)
-        self.text_input.insert(tk.END, self.text_output.get("1.0", tk.END))
+        self.text_input.insert(tk.END, self._get_full_output_text())
 
     def _copy_input_to_output(self):
         src = self.text_input.get("1.0", tk.END)
@@ -1194,7 +1759,7 @@ class App(tk.Tk):
 
     def _swap_input_output(self):
         in_text = self.text_input.get("1.0", tk.END)
-        out_text = self.text_output.get("1.0", tk.END)
+        out_text = self._get_full_output_text()
         self.text_input.delete("1.0", tk.END)
         self.text_input.insert(tk.END, out_text)
         self._set_output_text(in_text)
@@ -1204,8 +1769,10 @@ class App(tk.Tk):
         prev_state = str(self.text_output.cget("state"))
         try:
             if prev_state != "normal": self.text_output.config(state="normal")
+            self.output_log_chunks = [text]
             self.text_output.delete("1.0", tk.END)
             self.text_output.insert(tk.END, text)
+            self._trim_output_widget_lines()
         finally:
             if prev_state != str(self.text_output.cget("state")): self.text_output.config(state=prev_state)
 
@@ -1267,16 +1834,18 @@ class App(tk.Tk):
                 except: pass
 
         path = filedialog.asksaveasfilename(
-            title="プロンプトファイルの保存先を選択",
+            title="プロンプト保存先パスの選択",
             initialdir=initial_dir,
             initialfile=initial_file,
             filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
-            defaultextension=".txt"
+            defaultextension=".txt",
+            confirmoverwrite=False 
         )
         
         if path:
             self.ent_task_path.delete(0, tk.END)
             self.ent_task_path.insert(0, path)
+            # ここではファイル書き込みを行わず、Entryへの反映のみとする
 
     def _add_new_task(self):
         new_key = simpledialog.askstring("新規", "タスク名(メニュー表示名)を入力:")
@@ -1318,6 +1887,26 @@ class App(tk.Tk):
         if not new_key:
             messagebox.showwarning("警告", "タスク名を入力してください")
             return
+
+        # 既存ファイルへの上書き確認ロジックを追加
+        if path_str:
+            real_path = resolve_path(path_str)
+            if os.path.exists(real_path):
+                if not messagebox.askyesno("上書き確認", f"ファイルは既に存在します：\n{path_str}\n\n上書きしてよろしいですか？"):
+                    return
+
+            try:
+                os.makedirs(os.path.dirname(real_path), exist_ok=True)
+                with open(real_path, 'w', encoding='utf-8') as f: f.write(content)
+                self.raw_tasks_data[new_key] = path_str
+                messagebox.showinfo("保存", f"ファイルを更新しました: {path_str}")
+            except Exception as e:
+                messagebox.showerror("エラー", f"ファイル保存失敗: {e}")
+                return
+        else:
+            # JSON直接埋め込みの場合
+            self.raw_tasks_data[new_key] = content
+            messagebox.showinfo("保存", "JSON内のプロンプトを更新しました")
 
         old_key = self.current_editing_key
         is_rename = (old_key is not None) and (new_key != old_key)
@@ -1426,3 +2015,4 @@ if __name__ == "__main__":
     
     app = App()
     app.mainloop()
+    
